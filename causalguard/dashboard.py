@@ -223,6 +223,54 @@ class Dashboard:
             )
         console.print()
 
+    def show_l6_result(self, result):
+        """Layer 6: Dual-Lattice Taint Propagation (IFC)."""
+        from .layer6_taint import Layer6Result
+        if not result or not isinstance(result, Layer6Result):
+            return
+        status = (
+            "[bold red]POLICY VIOLATION[/bold red]"
+            if result.is_flagged
+            else "[bold green]ALLOW[/bold green]"
+        )
+        table = Table(
+            title="Layer 6: Dual-Lattice Taint Propagation (IFC)",
+            show_header=True,
+            header_style="bold magenta",
+        )
+        table.add_column("Status")
+        table.add_column("Context Label")
+        table.add_column("Enforcement")
+        table.add_column("Violations")
+        table.add_row(
+            status,
+            str(result.context_label),
+            result.enforcement_decision,
+            str(len(result.policy_violations)),
+        )
+        console.print(table)
+
+        for v in result.policy_violations:
+            console.print(
+                f"  [red]  Sink '{v.parameter}' of '{v.tool_name}()' "
+                f"received UNTRUSTED data (provenance: {v.tainted_value.provenance})[/red]"
+            )
+
+        if result.taint_graph:
+            taint_table = Table(title="Taint Graph", show_header=True, header_style="dim")
+            taint_table.add_column("Variable")
+            taint_table.add_column("Label")
+            taint_table.add_column("Provenance")
+            for name, tv in result.taint_graph.items():
+                label_color = "red" if str(tv.label) == "UNTRUSTED" else "green"
+                taint_table.add_row(
+                    name,
+                    f"[{label_color}]{tv.label}[/{label_color}]",
+                    tv.provenance,
+                )
+            console.print(taint_table)
+        console.print()
+
     def show_adaptive_resistance(self):
         """Static card: why CausalGuard resists adaptive attacks (The Attacker Moves Second)."""
         console.print(Panel(
@@ -230,6 +278,9 @@ class Dashboard:
             "[dim]L1 DFA:[/dim] No parameters → cannot be gradient-attacked\n"
             "[dim]L2 KL:[/dim] Analytical, not learned → resistant to gradient/RL optimization\n"
             "[dim]L3 Cosine:[/dim] Frozen embedding model → no fine-tuning surface\n"
+            "[dim]L4 Set-diff:[/dim] Pure math, no trainable parameters\n"
+            "[dim]L5 ODE:[/dim] Trained offline on clean data; gradient attack on L5 does not help bypass L1-L4\n"
+            "[dim]L6 IFC:[/dim] Lattice-based provable enforcement; no ML in the security path\n"
             "[dim]Contrast:[/dim] AI-based detectors have ~millions of tunable parameters.",
             title="Why CausalGuard Resists Adaptive Attacks",
             border_style="blue",

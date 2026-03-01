@@ -293,12 +293,13 @@ async def analyze(
         weight_structural * structural_score
     )
     
-    # Determine if any individual threshold is crossed
+    # Determine if flagged: require action type shift OR strong composite signal.
+    # A single parameter/structural change alone is not enough (reduces false
+    # positives on legitimate emails that naturally shift the response description).
     is_flagged = (
         action_score > kl_threshold or
-        param_score > jsd_threshold or
-        structural_score > jaccard_threshold or
-        causal_score > 0.5
+        (param_score > jsd_threshold and structural_score > jaccard_threshold) or
+        causal_score > 0.65
     )
     
     # Generate human-readable explanation

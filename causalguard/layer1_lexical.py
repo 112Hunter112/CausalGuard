@@ -24,6 +24,17 @@ from dataclasses import dataclass
 from typing import List, Tuple
 import unicodedata
 
+# ─────────────────────────────────────────────────────────────
+# Optional Rust accelerated scanner (true compiled DFA + SIMD)
+# Falls back to Python re module if not installed.
+# Build: cd rust_scanner && maturin develop --release
+# ─────────────────────────────────────────────────────────────
+try:
+    from causalguard_scanner import scan_patterns as _rust_scan_patterns
+    _USE_RUST = True
+except ImportError:
+    _USE_RUST = False
+
 
 @dataclass
 class Layer1Result:
@@ -218,25 +229,35 @@ def scan(content: str) -> Layer1Result:
     """
     Main entry point for Layer 1.
     Scans content against the injection grammar DFA.
+    Uses Rust compiled DFA if available, otherwise Python re fallback.
     Returns a Layer1Result with full forensic detail.
     """
     normalized = normalize_content(content)
-    
+
     flagged_spans = []
     categories_hit = set()
     max_weight = 0.0
 
-    for category, pattern in INJECTION_GRAMMAR:
-        for match in pattern.finditer(normalized):
-            flagged_spans.append((
-                match.start(),
-                match.end(),
-                match.group(0),
-                category
-            ))
-            categories_hit.add(category)
-            weight = CATEGORY_WEIGHTS.get(category, 0.5)
-            max_weight = max(max_weight, weight)
+    if _USE_RUST:
+        # Rust DFA scanner: true compiled DFA + SIMD acceleration
+        matches = _rust_scan_patterns(normalized)
+        for m in matches:
+            flagged_spans.append((m.start, m.end, m.matched_text, m.category))
+            categories_hit.add(m.category)
+            max_weight = max(max_weight, m.weight)
+    else:
+        # Python re fallback (backtracking NFA)
+        for category, pattern in INJECTION_GRAMMAR:
+            for match in pattern.finditer(normalized):
+                flagged_spans.append((
+                    match.start(),
+                    match.end(),
+                    match.group(0),
+                    category
+                ))
+                categories_hit.add(category)
+                weight = CATEGORY_WEIGHTS.get(category, 0.5)
+                max_weight = max(max_weight, weight)
 
     # Risk score: if any high-weight pattern fires, score is high
     # Multiple patterns of different categories increase score

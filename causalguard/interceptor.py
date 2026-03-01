@@ -23,6 +23,7 @@ from .layer5_neural_ode import (
     ensure_layer5_model,
     Layer5Result,
 )
+from .layer6_taint import analyze as l6_analyze, Layer6Result
 from .purifier import purify, PurifierResult
 from .dashboard import Dashboard
 from .attack_taxonomy import build_attack_anatomy, AttackAnatomy
@@ -46,6 +47,7 @@ class GuardReport:
     attack_anatomy: Optional[AttackAnatomy] = None
     l4_result: Optional[Layer4Result] = None
     l5_result: Optional[Layer5Result] = None
+    l6_result: Optional[Layer6Result] = None
 
 
 class CausalGuard:
@@ -55,8 +57,8 @@ class CausalGuard:
         
         # Load thresholds from environment
         self.l2_kl_threshold = float(os.getenv("LAYER2_KL_THRESHOLD", "0.8"))
-        self.l2_jsd_threshold = float(os.getenv("LAYER2_JSD_THRESHOLD", "0.5"))
-        self.l2_jaccard_threshold = float(os.getenv("LAYER2_JACCARD_THRESHOLD", "0.3"))
+        self.l2_jsd_threshold = float(os.getenv("LAYER2_JSD_THRESHOLD", "0.6"))
+        self.l2_jaccard_threshold = float(os.getenv("LAYER2_JACCARD_THRESHOLD", "0.5"))
         self.l3_cosine_threshold = float(os.getenv("LAYER3_COSINE_THRESHOLD", "0.75"))
         
         self.l1_enabled = os.getenv("LAYER1_ENABLED", "true").lower() == "true"
@@ -68,6 +70,45 @@ class CausalGuard:
         self.interception_log = []
         self.tool_registration_log: list[ToolRegistrationResult] = []
         self._l5_model: Optional[tuple] = None  # (ode, encoder) lazy-loaded
+
+    def _l2_thresholds_for_task(self, task: str, tool_name: str) -> Tuple[float, float, float]:
+        """
+        Use relaxed L2 thresholds when the user asked to read/summarise content.
+        Legitimate email, webpage, or search content is expected to change the agent's
+        next action (e.g. "summarise this"); we only flag strong hijacks.
+        """
+        t = (task or "").lower()
+        tool = (tool_name or "").lower()
+        content_tools = ("read_email", "read_document", "read_file", "fetch_url", "web_search")
+        is_content_tool = any(r in tool for r in content_tools)
+        asks_summarise = "summar" in t or "summary" in t
+        asks_details = "detail" in t or "info" in t or "webpage" in t or "web" in t
+        asks_read = "read" in t or "check" in t or "inbox" in t or "email" in t or "link" in t or "open" in t
+        if is_content_tool and (asks_summarise or asks_read or asks_details):
+            # Strong relaxation: benign content often shifts action KL to ~0.95
+            return (
+                min(0.99, self.l2_kl_threshold * 1.5),
+                min(0.70, self.l2_jsd_threshold * 1.3),
+                min(0.55, self.l2_jaccard_threshold * 1.3),
+            )
+        return self.l2_kl_threshold, self.l2_jsd_threshold, self.l2_jaccard_threshold
+
+    def _l3_threshold_for_task(self, task: str, tool_name: str) -> float:
+        """
+        For read/summarise/get-details tasks, only flag L3 when semantic drift is very large.
+        Normal summarisation or fetching a webpage changes the agent's "plan" text.
+        """
+        t = (task or "").lower()
+        tool = (tool_name or "").lower()
+        content_tools = ("read_email", "read_document", "read_file", "fetch_url", "web_search")
+        is_content_tool = any(r in tool for r in content_tools)
+        asks_summarise = "summar" in t or "summary" in t
+        asks_details = "detail" in t or "info" in t or "webpage" in t or "web" in t
+        asks_read = "read" in t or "check" in t or "inbox" in t or "email" in t or "link" in t or "open" in t
+        if is_content_tool and (asks_summarise or asks_read or asks_details):
+            # Flag only when similarity drops below 0.5 (large drift)
+            return max(0.45, self.l3_cosine_threshold - 0.25)
+        return self.l3_cosine_threshold
 
     async def intercept(
         self,
@@ -92,40 +133,55 @@ class CausalGuard:
         l3_result = None
         purifier_result = None
         flags = []
-        
-        # ─────────────── LAYER 1 ───────────────
-        if self.l1_enabled:
-            l1_result = l1_scan(retrieved_content)
+
+        # ─────────────── PARALLEL: LAYER 1 + LAYER 2 ───────────────
+        # L1 (CPU-bound DFA ~1ms) and L2 (IO-bound LLM ~3s) are independent.
+        # Run them concurrently with asyncio.gather for wall-clock savings.
+
+        async def _run_l1():
+            if not self.l1_enabled:
+                return None
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, l1_scan, retrieved_content)
+
+        async def _run_l2():
+            if not self.l2_enabled:
+                return None
+            kl, jsd, jacc = self._l2_thresholds_for_task(task, tool_name)
+            return await l2_analyze(
+                task=task,
+                retrieved_content=retrieved_content,
+                llm_client=self.llm,
+                kl_threshold=kl,
+                jsd_threshold=jsd,
+                jaccard_threshold=jacc
+            )
+
+        l1_result, l2_result = await asyncio.gather(_run_l1(), _run_l2())
+
+        # Show results (L1 first for dashboard ordering)
+        if l1_result:
             if self.dashboard:
                 self.dashboard.show_l1_result(l1_result)
             if l1_result.is_flagged:
                 flags.append("L1")
-        
-        # ─────────────── LAYER 2 ───────────────
-        # Run Layer 2 regardless of L1 — catches attacks L1 misses
-        if self.l2_enabled:
-            l2_result = await l2_analyze(
-                task=task,
-                retrieved_content=retrieved_content,
-                llm_client=self.llm,
-                kl_threshold=self.l2_kl_threshold,
-                jsd_threshold=self.l2_jsd_threshold,
-                jaccard_threshold=self.l2_jaccard_threshold
-            )
+
+        if l2_result:
             if self.dashboard:
                 self.dashboard.show_l2_result(l2_result)
             if l2_result.is_flagged:
                 flags.append("L2")
-        
-        # ─────────────── LAYER 3 ───────────────
+
+        # ─────────────── LAYER 3 (depends on L2 output) ───────────────
         if self.l3_enabled and l2_result:
             baseline_text = l2_result.baseline_intent.action_description if l2_result.baseline_intent else task
             full_text = l2_result.full_intent.action_description if l2_result.full_intent else retrieved_content[:200]
-            
+            l3_cosine = self._l3_threshold_for_task(task, tool_name)
+
             l3_result = l3_analyze(
                 baseline_action_text=baseline_text,
                 full_action_text=full_text,
-                cosine_threshold=self.l3_cosine_threshold
+                cosine_threshold=l3_cosine
             )
             if self.dashboard:
                 self.dashboard.show_l3_result(l3_result)
@@ -227,3 +283,64 @@ class CausalGuard:
                 if self.dashboard:
                     self.dashboard.show_l5_result(l5_result)
         return l4_result
+
+    async def report_tool_calls_parallel(
+        self,
+        task: str,
+        actual_tool_calls: list[str],
+        proposed_tool_call: Optional[dict] = None,
+    ) -> tuple:
+        """Run L4, L5, L6 in parallel using asyncio.gather.
+        Returns (l4_result, l5_result, l6_result)."""
+
+        task_type = infer_task_type(task)
+
+        async def _run_l4():
+            if not self.l4_enabled:
+                return None
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
+                None, lambda: monitor_tool_calls(task_type, actual_tool_calls, task=task)
+            )
+
+        async def _run_l5():
+            if not self.l5_enabled or len(actual_tool_calls) < 2:
+                return None
+            if self._l5_model is None:
+                self._l5_model = ensure_layer5_model(train_if_missing=False)
+            if self._l5_model is None:
+                return None
+            ode, encoder = self._l5_model
+            session = [(task_type, t) for t in actual_tool_calls]
+            return l5_analyze_session(ode, encoder, session, threshold=self.l5_threshold)
+
+        async def _run_l6():
+            if proposed_tool_call is None:
+                return None
+            last_content = ""
+            if self.interception_log:
+                last_content = self.interception_log[-1].original_content
+            return l6_analyze(task, last_content, proposed_tool_call)
+
+        l4_result, l5_result, l6_result = await asyncio.gather(
+            _run_l4(), _run_l5(), _run_l6()
+        )
+
+        # Update last report and show dashboard
+        if self.interception_log:
+            if l4_result:
+                self.interception_log[-1].l4_result = l4_result
+            if l5_result:
+                self.interception_log[-1].l5_result = l5_result
+            if l6_result:
+                self.interception_log[-1].l6_result = l6_result
+
+        if self.dashboard:
+            if l4_result:
+                self.dashboard.show_l4_result(l4_result)
+            if l5_result:
+                self.dashboard.show_l5_result(l5_result)
+            if l6_result:
+                self.dashboard.show_l6_result(l6_result)
+
+        return l4_result, l5_result, l6_result

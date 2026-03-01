@@ -24,14 +24,14 @@ async def run_demo():
     dashboard.show_banner()
     dashboard.show_adaptive_resistance()
 
-    # Initialize LLM client
+    # Initialize LLM client (uses Vertex AI via gcloud CLI credentials)
     from llm_client import LLMClient
     try:
         llm = LLMClient()
-    except ValueError as e:
+    except Exception as e:
         from rich import print as rprint
         rprint(f"[bold red]Error: {e}[/bold red]")
-        print("Please set GOOGLE_API_KEY or OPENAI_API_KEY in your .env file.")
+        print("Run: gcloud auth application-default login")
         return
 
     print("\n" + "="*70)

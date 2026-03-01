@@ -1,0 +1,34 @@
+{
+  "mcpServers": {
+
+    "filesystem-protected": {
+      "command": "python",
+      "args": [
+        "C:/Users/Parth Aditya/projects/NotesCompleter/CausalGuard/causalguard_mcp_proxy.py",
+        "--",
+        "npx", "-y", "@modelcontextprotocol/server-filesystem",
+        "C:/Users/Parth Aditya/Documents"
+      ]
+    },
+
+    "filesystem-protected-fast": {
+      "command": "python",
+      "args": [
+        "C:/Users/Parth Aditya/projects/NotesCompleter/CausalGuard/causalguard_mcp_proxy.py",
+        "--fast",
+        "--",
+        "npx", "-y", "@modelcontextprotocol/server-filesystem",
+        "C:/Users/Parth Aditya/Documents"
+      ]
+    },
+
+    "filesystem-UNPROTECTED": {
+      "command": "npx",
+      "args": [
+        "-y", "@modelcontextprotocol/server-filesystem",
+        "C:/Users/Parth Aditya/Documents"
+      ]
+    }
+
+  }
+}

@@ -1,5 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 
+// API base: Vercel uses env var; local dev uses localhost
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
 // Product UI: cool grays, single blue accent (Google/Apple style). No amber, no gradients.
 const t = {
   gray: { 50: '#fafafa', 100: '#f4f4f5', 200: '#e4e4e7', 300: '#d4d4d8', 400: '#a1a1aa', 500: '#71717a', 600: '#52525b', 700: '#3f3f46', 800: '#27272a', 900: '#18181b' },
@@ -375,7 +378,7 @@ const AttackLabTab = () => {
     setRunning(true);
     setL1(null); setL2(null); setL3(null); setL4(null); setL5(null); setL6(null); setDecision(null);
     try {
-      const res = await fetch('http://localhost:5000/api/analyze', {
+      const res = await fetch(`${API_BASE}/api/analyze`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ task, content }),
       });
@@ -406,7 +409,7 @@ const AttackLabTab = () => {
     if (!customInjection.trim()) return;
     setSimLoading(true); setSimResult(null);
     try {
-      const res = await fetch('http://localhost:5000/api/analyze', {
+      const res = await fetch(`${API_BASE}/api/analyze`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ task: 'Summarize and email to team@company.com', content: customInjection.trim() }),
       });
@@ -599,7 +602,7 @@ function App() {
     setMessages(prev => [...prev, { role: 'user', content: msg }]);
 
     try {
-      const res = await fetch('http://localhost:5000/api/chat', {
+      const res = await fetch(`${API_BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: msg, scenario, history: messages }),

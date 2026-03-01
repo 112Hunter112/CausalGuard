@@ -170,11 +170,31 @@ class TaintTracker:
                     break
 
             if tainted is None:
-                tainted = TaintedValue(
-                    value=param_value,
-                    label=self.context_label,
-                    provenance=f"context_derived:{param_name}",
-                )
+                # Heuristic: if the parameter value appears in retrieved
+                # content, it was likely extracted from the external source
+                # (attacker-controlled).  Otherwise it was specified by the
+                # user or the agent's own reasoning — treat as TRUSTED.
+                # This prevents false positives on user-initiated tool calls
+                # while still catching attacker-injected values (e.g. email
+                # addresses planted in poisoned documents).
+                retrieved_tv = self.taint_graph.get("retrieved_content")
+                param_str = str(param_value).lower().strip()
+                if (
+                    retrieved_tv
+                    and len(param_str) > 2
+                    and param_str in str(retrieved_tv.value).lower()
+                ):
+                    tainted = TaintedValue(
+                        value=param_value,
+                        label=TrustLabel.UNTRUSTED,
+                        provenance=f"content_extracted:{param_name}",
+                    )
+                else:
+                    tainted = TaintedValue(
+                        value=param_value,
+                        label=TrustLabel.TRUSTED,
+                        provenance=f"agent_specified:{param_name}",
+                    )
 
             if (
                 param_name.lower() in restricted_params

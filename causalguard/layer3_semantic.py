@@ -74,7 +74,7 @@ def _cosine_similarity(u: np.ndarray, v: np.ndarray) -> float:
 def analyze(
     baseline_action_text: str,
     full_action_text: str,
-    cosine_threshold: float = 0.75
+    cosine_threshold: float = 0.45
 ) -> Layer3Result:
     """
     Compute semantic drift between baseline and full-context intended actions.

@@ -57,13 +57,13 @@ INJECTION_GRAMMAR = [
     # CATEGORY 1: Direct imperative hijacks
     # These directly override system instructions
     ("DIRECT_HIJACK", re.compile(
-        r'(?i)(ignore\s+(all\s+)?(previous|prior|above|earlier|your|the\s+above)\s+'
-        r'(instructions?|prompts?|commands?|context|rules?|constraints?))',
+        r'(?i)(ignore\s+(all\s+)?(previous|prior|above|earlier|original|your|the\s+above|the\s+original)\s+'
+        r'(instructions?|prompts?|commands?|context|rules?|constraints?|tasks?))',
         re.MULTILINE
     )),
     ("DIRECT_HIJACK", re.compile(
-        r'(?i)(disregard\s+(all\s+)?(previous|prior|above|earlier|your)\s+'
-        r'(instructions?|prompts?|commands?|context|rules?))',
+        r'(?i)(disregard\s+(all\s+)?(previous|prior|above|earlier|original|your)\s+'
+        r'(instructions?|prompts?|commands?|context|rules?|tasks?))',
         re.MULTILINE
     )),
     ("DIRECT_HIJACK", re.compile(
@@ -74,6 +74,11 @@ INJECTION_GRAMMAR = [
     ("DIRECT_HIJACK", re.compile(
         r'(?i)(override\s+(your\s+)?(previous|prior|current|existing)\s+'
         r'(instructions?|programming|settings?|configuration))',
+        re.MULTILINE
+    )),
+    # "SYSTEM OVERRIDE" / "SYSTEM NOTICE" / "IMPORTANT SYSTEM" boundary markers
+    ("DIRECT_HIJACK", re.compile(
+        r'(?i)(system\s+(override|alert|notice|notification|update)\s*[:\-])',
         re.MULTILINE
     )),
     ("DIRECT_HIJACK", re.compile(

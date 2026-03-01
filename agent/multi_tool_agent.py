@@ -24,6 +24,7 @@ from urllib.error import URLError, HTTPError
 
 from .scenarios import (
     EMAIL_INBOX,
+    EMAIL_INBOX_ATTACK_DEMO,
     WEB_RESULTS,
     CALENDAR_EVENTS,
     SCENARIOS,
@@ -106,7 +107,7 @@ class MultiToolAgent:
             except Exception as e:
                 return f"Gmail error: {e}. Falling back to demo data."
 
-        inbox = list(EMAIL_INBOX)
+        inbox = list(EMAIL_INBOX_ATTACK_DEMO if self.scenario == "email_attack_demo" else EMAIL_INBOX)
         if query and query.strip():
             q = query.strip().lower()
             inbox = [
@@ -215,7 +216,12 @@ class MultiToolAgent:
             return "Error: please provide a URL (e.g. fetch_url with args {\"url\": \"https://...\"})."
         url = url.strip()
         if not url.startswith(("http://", "https://")):
-            url = "https://" + url
+            # Use http for localhost so demo server (no TLS) works
+            lower = url.lower()
+            if lower.startswith("localhost") or lower.startswith("127.0.0.1"):
+                url = "http://" + url
+            else:
+                url = "https://" + url
         try:
             req = Request(url, headers={"User-Agent": "CausalGuard-Agent/1.0"})
             ctx = ssl.create_default_context()
@@ -261,6 +267,42 @@ class MultiToolAgent:
         sig = inspect.signature(tool_fn)
         allowed = {p for p in sig.parameters if p != "self"}
         safe_args = {k: v for k, v in (args or {}).items() if k in allowed}
+
+        # L6: before executing send_email/write_file, check if untrusted data would flow to sink
+        guard_report = None
+        was_intercepted = False
+        if self.guard and tool_name in ("send_email", "write_file"):
+            allow, l6_result = await self.guard.check_sink_before_execute(
+                task, tool_name, safe_args
+            )
+            if not allow and l6_result:
+                from causalguard.interceptor import GuardReport
+                block_msg = f"Blocked by CausalGuard (L6): {l6_result.explanation}"
+                guard_report = GuardReport(
+                    tool_name=tool_name,
+                    original_content="",
+                    processed_content=block_msg,
+                    was_flagged=True,
+                    final_decision="BLOCK",
+                    l1_result=None,
+                    l2_result=None,
+                    l3_result=None,
+                    purifier_result=None,
+                    total_latency_ms=0.0,
+                    threat_level="CRITICAL",
+                    l6_result=l6_result,
+                )
+                tc = ToolCall(
+                    tool_name=tool_name,
+                    args=args,
+                    raw_result="[Blocked by CausalGuard L6]",
+                    processed_result=block_msg,
+                    was_intercepted=True,
+                    guard_report=guard_report,
+                )
+                self.tool_calls_log.append(tc)
+                return tc
+
         # Call the tool (handle both sync and async tools)
         result = tool_fn(**safe_args) if safe_args else tool_fn()
         if asyncio.iscoroutine(result):
@@ -270,14 +312,14 @@ class MultiToolAgent:
 
         # CausalGuard intercepts tool outputs that bring external content
         processed_result = raw_result
-        guard_report = None
-        was_intercepted = False
 
         if self.guard and tool_name not in ("send_email", "write_file"):
+            demo_pass_through = self.scenario == "email_attack_demo"
             processed_result, guard_report = await self.guard.intercept(
                 task=task,
                 retrieved_content=raw_result,
                 tool_name=tool_name,
+                demo_pass_through=demo_pass_through,
             )
             was_intercepted = guard_report.was_flagged if guard_report else False
 
@@ -470,28 +512,39 @@ OR if you have enough information for a detailed, comprehensive answer:
 
             # ── OBSERVE: Record what the agent saw ──
             content_preview = tc.processed_result[:800]
+            l6_block = tc.guard_report and tc.guard_report.final_decision == "BLOCK" and getattr(tc.guard_report, "l6_result", None)
+            suffix = ""
+            if tc.was_intercepted:
+                suffix = " [BLOCKED BY CAUSALGUARD L6 - sink action not executed]" if l6_block else " [CONTENT WAS PURIFIED BY CAUSALGUARD - injection removed]"
             observations.append(
                 f"[Step {step+1}] Called {tool_name}({json.dumps(tool_args)}):\n"
-                f"{content_preview}"
-                f"{' [CONTENT WAS PURIFIED BY CAUSALGUARD - injection removed]' if tc.was_intercepted else ''}"
+                f"{content_preview}{suffix}"
             )
 
             if tc.was_intercepted and tc.guard_report:
+                is_l6_block = tc.guard_report.final_decision == "BLOCK" and getattr(
+                    tc.guard_report, "l6_result", None
+                )
                 alert = {
                     "type": "guard_alert",
                     "tool": tool_name,
-                    "summary": f"Injection detected in {tool_name}() output — content purified",
+                    "summary": (
+                        f"Sink action blocked by CausalGuard (L6): {tc.guard_report.l6_result.explanation}"
+                        if is_l6_block
+                        else f"Injection detected in {tool_name}() output — content purified"
+                    ),
                     "decision": tc.guard_report.final_decision,
                     "threat_level": tc.guard_report.threat_level,
-                    "layers_flagged": [],
+                    "layers_flagged": ["L6"] if is_l6_block else [],
                     "step": step + 1,
                 }
-                if tc.guard_report.l1_result and tc.guard_report.l1_result.is_flagged:
-                    alert["layers_flagged"].append("L1")
-                if tc.guard_report.l2_result and tc.guard_report.l2_result.is_flagged:
-                    alert["layers_flagged"].append("L2")
-                if tc.guard_report.l3_result and tc.guard_report.l3_result.is_flagged:
-                    alert["layers_flagged"].append("L3")
+                if not is_l6_block:
+                    if tc.guard_report.l1_result and tc.guard_report.l1_result.is_flagged:
+                        alert["layers_flagged"].append("L1")
+                    if tc.guard_report.l2_result and tc.guard_report.l2_result.is_flagged:
+                        alert["layers_flagged"].append("L2")
+                    if tc.guard_report.l3_result and tc.guard_report.l3_result.is_flagged:
+                        alert["layers_flagged"].append("L3")
                 guard_alerts.append(alert)
                 if on_event:
                     on_event(alert)
@@ -634,6 +687,8 @@ def _serialize_guard_report(report) -> dict:
         }
     if report.attack_anatomy:
         data["attack_anatomy"] = report.attack_anatomy.to_dict()
+    if getattr(report, "l6_result", None):
+        data["l6"] = _serialize_l6(report.l6_result)
     return data
 
 
@@ -650,6 +705,7 @@ def _serialize_l4(result) -> dict:
 
 def _serialize_l5(result) -> dict:
     return {
+        "available": True,
         "flagged": result.flagged,
         "anomaly_score": round(result.anomaly_score, 4),
         "threshold": result.threshold,

@@ -106,14 +106,24 @@ def analyze():
 
         # ── L4: Tool Invocation Anomaly ──
         task_type = infer_task_type(task)
-        # Simulate tools from L2 full intent
-        simulated_tools = ["read_document"]
+        # Simulate expected tools based on task type (must match what L4 expects)
+        _TASK_TYPE_TOOLS = {
+            "email": ["read_email"],
+            "search": ["web_search"],
+            "summarize": ["read_document"],
+            "file_op": ["read_document"],
+        }
+        simulated_tools = _TASK_TYPE_TOOLS.get(task_type, ["read_document"])
+        # If L2 detected a side-effect action, add it (this IS suspicious)
         if l2_result and l2_result.full_intent:
-            fa = l2_result.full_intent.action_type
-            if "email" in fa:
-                simulated_tools = ["read_document", "send_email"]
-            elif "upload" in fa:
-                simulated_tools = ["read_document", "upload_file"]
+            fa = (l2_result.full_intent.action_type or "").lower()
+            if "email" in fa and "send_email" not in simulated_tools:
+                simulated_tools.append("send_email")
+            elif "upload" in fa and "upload_file" not in simulated_tools:
+                simulated_tools.append("upload_file")
+            elif ("write" in fa or "file" in fa) and "write_file" not in simulated_tools:
+                if fa not in ("read_file", "read_document"):
+                    simulated_tools.append("write_file")
         l4_result = monitor_tool_calls(task_type, simulated_tools, task=task)
         yield f"data: {json.dumps({'layer': 4, 'flagged': l4_result.flagged, 'unexpected_tools': l4_result.unexpected_tools, 'expected_tools': l4_result.expected_tools, 'actual_tools': l4_result.actual_tools, 'jaccard_anomaly': round(l4_result.jaccard_anomaly_score, 4), 'task_type': l4_result.task_type})}\n\n"
 
@@ -144,6 +154,7 @@ def analyze():
         yield f"data: {json.dumps({'layer': 6, 'flagged': l6_result.is_flagged, 'enforcement_decision': l6_result.enforcement_decision, 'context_label': str(l6_result.context_label), 'explanation': l6_result.explanation, 'violations': [{'tool': v.tool_name, 'parameter': v.parameter, 'policy_rule': v.policy_rule, 'taint_label': str(v.tainted_value.label), 'provenance': v.tainted_value.provenance} for v in l6_result.policy_violations], 'taint_graph': {name: {'label': str(tv.label), 'provenance': tv.provenance} for name, tv in l6_result.taint_graph.items()}})}\n\n"
 
         # ── Decision ──
+        # Collect all layer flags for reporting
         flags = []
         if l1_result.is_flagged: flags.append("L1")
         if l2_result.is_flagged: flags.append("L2")
@@ -151,6 +162,21 @@ def analyze():
         if l4_result.flagged: flags.append("L4")
         if l5_data.get('available') and l5_data.get('flagged'): flags.append("L5")
         if l6_result.is_flagged: flags.append("L6")
+
+        # Smart decision: require structural corroboration for semantic-only flags.
+        # L2/L3 are LLM-dependent semantic checks that can false-positive on benign
+        # content describing actions (code with email_service.send(), logs with
+        # "sending alert", security articles about injection, etc.).
+        # L1/L4/L5/L6 are pattern/structural checks with very low false positive rates.
+        structural_flags = {"L1", "L4", "L5", "L6"}
+        has_structural = bool(structural_flags & set(flags))
+        semantic_only = flags and not has_structural
+        if semantic_only:
+            # Semantic-only: only purify if L2 causal score is very high
+            if l2_result.is_flagged and l2_result.causal_divergence_score > 0.90:
+                pass  # keep flags, will purify
+            else:
+                flags = []  # clear flags — likely false positive
 
         threat_level = calculate_threat_level(flags, l2_result.causal_divergence_score)
 
@@ -261,6 +287,11 @@ def chat():
             yield f"data: {json.dumps({'type': 'layer_result', 'layer': 4, **result['l4_result']})}\n\n"
         if result.get("l5_result"):
             yield f"data: {json.dumps({'type': 'layer_result', 'layer': 5, **result['l5_result']})}\n\n"
+        else:
+            # So the UI can show why L5 didn't run (need 2+ tools or no checkpoint)
+            n_tools = len(result.get("tool_calls") or [])
+            reason = "need_2_tools" if n_tools < 2 else "no_checkpoint"
+            yield f"data: {json.dumps({'type': 'layer_result', 'layer': 5, 'available': False, 'reason': reason})}\n\n"
         if result.get("l6_result"):
             yield f"data: {json.dumps({'type': 'layer_result', 'layer': 6, **result['l6_result']})}\n\n"
 

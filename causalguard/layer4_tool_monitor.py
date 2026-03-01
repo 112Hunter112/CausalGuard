@@ -21,7 +21,7 @@ TASK_TOOL_PROFILES = {
     "summarize": {"read_document"},
     "summarize_web": {"fetch_url", "web_search", "read_document"},  # summarize from link/webpage
     "email_draft": {"read_document", "send_email"},
-    "email_inbox": {"read_email", "fetch_url", "web_search"},  # summarize inbox/links; web_search ok as fallback (e.g. link 403)
+    "email_inbox": {"read_email", "read_document", "fetch_url", "web_search"},  # summarize inbox; open attachments; links
     "email_inbox_reply": {"read_email", "send_email", "fetch_url", "web_search"},
     "search": {"web_search", "fetch_url"},
     "read_file": {"read_document", "fetch_url"},

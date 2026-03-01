@@ -35,7 +35,7 @@ import json
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Tuple, Dict, Any, Callable
 
 import numpy as np
 import torch
@@ -288,10 +288,12 @@ def train_behavioral_ode(
     epochs: int = 80,
     lr: float = 1e-3,
     device: Optional[torch.device] = None,
+    on_epoch_done: Optional[Callable[[int, int, float], None]] = None,
 ) -> Tuple[AgentDynamicsODE, EventEncoder]:
     """
     Train the Neural ODE on normal sessions. Minimizes mean squared error
     between ODE-predicted trajectory and observed (encoded) trajectory.
+    on_epoch_done: optional callback(epoch_1based, total_epochs, avg_loss) for progress.
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -324,8 +326,11 @@ def train_behavioral_ode(
             optim.step()
             total_loss += loss.item()
             n_batch += 1
-        if (epoch + 1) % 20 == 0 and n_batch > 0:
-            print(f"  Layer 5 train epoch {epoch+1}/{epochs} loss={total_loss/n_batch:.6f}")
+        avg_loss = total_loss / n_batch if n_batch > 0 else 0.0
+        if on_epoch_done:
+            on_epoch_done(epoch + 1, epochs, avg_loss)
+        elif (epoch + 1) % 20 == 0 and n_batch > 0:
+            print(f"  Layer 5 train epoch {epoch+1}/{epochs} loss={avg_loss:.6f}")
     return ode, encoder
 
 

@@ -1,7 +1,7 @@
 # Core
 python-dotenv==1.0.0
 numpy==1.26.4
-scipy==1.13.0
+scipy>=1.11,<1.14
 pydantic==2.7.0
 
 # Sentence transformers (Layer 3 — runs locally, no API)

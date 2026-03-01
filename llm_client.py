@@ -10,6 +10,14 @@ Configure via .env: GOOGLE_CLOUD_PROJECT, VERTEX_REGION, ANTHROPIC_MODEL (option
 """
 
 import os
+
+# Load .env so module-level reads pick up the project ID
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 from anthropic import AsyncAnthropicVertex
 from google import genai
 from google.genai import types

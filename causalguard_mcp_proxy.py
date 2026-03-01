@@ -60,6 +60,13 @@ _ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _ROOT)
 os.chdir(_ROOT)
 
+# Load .env for Vertex AI project config
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # Suppress noisy warnings before heavy imports
 import warnings
 warnings.filterwarnings("ignore", message=".*resume_download.*", category=FutureWarning)

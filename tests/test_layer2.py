@@ -87,8 +87,9 @@ class TestKLDivergence:
 
     def test_asymmetric(self):
         """D_KL(P||Q) != D_KL(Q||P) in general."""
-        p = np.array([0.8, 0.1, 0.1])
-        q = np.array([0.2, 0.4, 0.4])
+        # Use non-permutation distributions that are genuinely asymmetric
+        p = np.array([0.7, 0.2, 0.1])
+        q = np.array([0.1, 0.3, 0.6])
         assert _kl_divergence(p, q) != pytest.approx(_kl_divergence(q, p), abs=1e-4)
 
 

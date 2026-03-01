@@ -27,6 +27,13 @@ from causalguard.layer5_neural_ode import (
     ensure_layer5_model,
 )
 
+try:
+    from rich.console import Console
+    from rich.progress import Progress, BarColumn, TextColumn, TaskProgressColumn
+    _HAS_RICH = True
+except ImportError:
+    _HAS_RICH = False
+
 
 def main():
     print("Layer 5: Neural ODE Behavioral Dynamics — Training")
@@ -35,15 +42,38 @@ def main():
 
     sessions = generate_normal_sessions(num_sessions=300, min_steps=2, max_steps=5)
     print(f"Generated {len(sessions)} normal sessions (2–5 steps each).")
+    print()
 
-    ode, encoder = train_behavioral_ode(
-        sessions,
-        latent_dim=32,
-        embedding_dim=24,
-        hidden_dim=64,
-        epochs=100,
-        lr=1e-3,
-    )
+    epochs = 100
+    if _HAS_RICH:
+        with Progress(
+            TextColumn("[bold blue]Training[/]"),
+            BarColumn(bar_width=40),
+            TaskProgressColumn(),
+            TextColumn("• loss: {task.fields[loss]:.6f}"),
+            console=Console(),
+        ) as progress:
+            task = progress.add_task("epochs", total=epochs, loss=0.0)
+            def on_epoch(epoch, total, avg_loss):
+                progress.update(task, completed=epoch, loss=avg_loss)
+            ode, encoder = train_behavioral_ode(
+                sessions,
+                latent_dim=32,
+                embedding_dim=24,
+                hidden_dim=64,
+                epochs=epochs,
+                lr=1e-3,
+                on_epoch_done=on_epoch,
+            )
+    else:
+        ode, encoder = train_behavioral_ode(
+            sessions,
+            latent_dim=32,
+            embedding_dim=24,
+            hidden_dim=64,
+            epochs=epochs,
+            lr=1e-3,
+        )
 
     path = get_default_checkpoint_path()
     save_layer5_checkpoint(ode, encoder, path)

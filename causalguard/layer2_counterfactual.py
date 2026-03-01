@@ -264,6 +264,7 @@ async def analyze(
     kl_threshold: float = 0.8,
     jsd_threshold: float = 0.5,
     jaccard_threshold: float = 0.3,
+    composite_threshold: float = 0.75,
     weight_action: float = 0.5,
     weight_param: float = 0.3,
     weight_structural: float = 0.2,
@@ -293,13 +294,26 @@ async def analyze(
         weight_structural * structural_score
     )
     
-    # Determine if flagged: require action type shift OR strong composite signal.
-    # A single parameter/structural change alone is not enough (reduces false
-    # positives on legitimate emails that naturally shift the response description).
+    # Determine if flagged.  Action type shifts are only suspicious when
+    # the shift is toward a *side-effect* action (send_email, write_file,
+    # execute_code, etc.).  Benign progressions like read→summarize or
+    # search→analyze are normal task flow, not injections.
+    _BENIGN_ACTIONS = {
+        "read", "read_file", "read_email", "read_document",
+        "summarize", "summarise", "summary", "analyze", "analyse",
+        "review", "search", "list", "check", "view", "get", "fetch",
+        "describe", "explain", "extract", "parse", "classify", "other",
+    }
+    full_action_lower = (full_intent.action_type or "").lower().replace(" ", "_")
+    action_shift_is_dangerous = (
+        action_score > kl_threshold
+        and full_action_lower not in _BENIGN_ACTIONS
+    )
+
     is_flagged = (
-        action_score > kl_threshold or
+        action_shift_is_dangerous or
         (param_score > jsd_threshold and structural_score > jaccard_threshold) or
-        causal_score > 0.65
+        causal_score > composite_threshold
     )
     
     # Generate human-readable explanation

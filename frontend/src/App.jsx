@@ -195,7 +195,7 @@ const DefensePanel = ({ guardReport, l4, l5, l6, running }) => {
         </div>
         {r.final_decision && (
           <div style={{ fontSize: 11, color: t.gray[500], marginTop: 4 }}>
-            Decision: {r.final_decision} | {r.threat_level} | {r.total_latency_ms?.toFixed(0)}ms
+            Decision: {r.final_decision === 'PASS_THROUGH_DEMO' ? 'PASS THROUGH (demo – L6 blocks action)' : r.final_decision} | {r.threat_level} | {r.total_latency_ms?.toFixed(0)}ms
           </div>
         )}
       </div>
@@ -283,7 +283,13 @@ const DefensePanel = ({ guardReport, l4, l5, l6, running }) => {
             </div>
           </>
         )}
-        {l5 && !l5.available && <div style={{ fontSize: 10, color: t.gray[500] }}>Train: <code style={{ color: t.blue }}>python train_layer5.py</code></div>}
+        {l5 && !l5.available && (
+          <div style={{ fontSize: 10, color: t.gray[500] }}>
+            {l5.reason === 'need_2_tools'
+              ? 'Use 2+ tools in one reply (e.g. read email then open a URL) to run L5.'
+              : <>Train: <code style={{ color: t.blue }}>python train_layer5.py</code></>}
+          </div>
+        )}
       </LayerCard>
 
       <LayerCard title="L6 — Taint IFC" subtitle="Security lattice" status={l6 ? (l6.flagged ? 'POLICY VIOLATION' : 'ALLOW') : running ? 'TRACKING...' : null} active={!!l6 || running}>
@@ -615,6 +621,7 @@ function App() {
               setMessages(prev => [...prev, { role: 'guard', ...event }]);
             } else if (event.type === 'guard_report') {
               setGuardReport(event);
+              if (event.l6) setL6Data({ ...event.l6, layer: 6 });
             } else if (event.type === 'layer_result') {
               if (event.layer === 4) setL4Data(event);
               else if (event.layer === 5) setL5Data(event);

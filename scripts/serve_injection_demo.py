@@ -1,12 +1,12 @@
 """
-Serve the malicious webpage from attacks/malicious_webpage.txt on localhost:8765.
-Use this so the agent can fetch_url("http://localhost:8765") and L5 can see
-the trajectory after visiting a page with injected content.
+Serve a demo page with hidden injection on localhost:8765.
+Default: attacks/malicious_webpage.txt (Financial News).
+For curated web demo (movie rating site): use --movie or pass path.
 
 Run from project root:
   python scripts/serve_injection_demo.py
-Then in the chat: "Read my email then open http://localhost:8765 and summarize the page"
-(to get 2+ tool calls so L5 runs).
+  python scripts/serve_injection_demo.py --movie
+  python scripts/serve_injection_demo.py attacks/malicious_movie_site.html
 """
 
 import sys
@@ -14,32 +14,48 @@ from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 ROOT = Path(__file__).resolve().parent.parent
-PAGE = ROOT / "attacks" / "malicious_webpage.txt"
+ATTACKS = ROOT / "attacks"
+DEFAULT_PAGE = ATTACKS / "malicious_webpage.txt"
+MOVIE_PAGE = ATTACKS / "malicious_movie_site.html"
 PORT = 8765
+
+
+def get_page() -> Path:
+    args = sys.argv[1:]
+    if not args:
+        return DEFAULT_PAGE
+    if args[0] == "--movie":
+        return MOVIE_PAGE
+    p = Path(args[0])
+    if not p.is_absolute():
+        p = ROOT / p
+    return p
 
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        if not PAGE.exists():
-            self.send_error(404, "malicious_webpage.txt not found")
+        if not self.server.page_path.exists():
+            self.send_error(404, "File not found")
             return
         self.send_response(200)
         self.send_header("Content-type", "text/html; charset=utf-8")
         self.end_headers()
-        self.wfile.write(PAGE.read_bytes(encoding="utf-8"))
+        self.wfile.write(self.server.page_path.read_bytes(encoding="utf-8"))
 
-    def log_message(self, *args):  # quiet
+    def log_message(self, *args):
         pass
 
 
 def main():
-    if not PAGE.exists():
-        print(f"Missing {PAGE}")
+    page = get_page()
+    if not page.exists():
+        print(f"Missing {page}")
         sys.exit(1)
     server = HTTPServer(("", PORT), Handler)
+    server.page_path = page
     print(f"Injection demo server: http://localhost:{PORT}")
-    print(f"Serving: {PAGE.name}")
-    print("Stop with Ctrl+C. Then start backend and chat to see L5 respond.")
+    print(f"Serving: {page.name}")
+    print("Stop with Ctrl+C.")
     server.serve_forever()
 
 

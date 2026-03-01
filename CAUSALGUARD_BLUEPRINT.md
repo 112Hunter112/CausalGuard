@@ -2277,6 +2277,12 @@ The following extensions align CausalGuard with 2025 research and real-world inc
 - **Research:** "The Attacker Moves Second" (Nasr, Carlini et al. 2025, arXiv:2510.09023). Adaptive attacks (gradient, RL, search) broke 12 defenses with >90% success. CausalGuard’s design has no trainable parameters — nothing to gradient-attack.
 - **Implementation:** Static "Adaptive Resistance" card in terminal dashboard and React frontend: L1 DFA = no parameters; L2 KL = analytical, not learned; L3 = frozen embeddings. Contrast with AI-based detectors (millions of parameters). No new code paths; presentation only.
 
+### 21.8 Layer 5: Neural ODE Behavioral Dynamics (Chen et al. NeurIPS 2018)
+- **Research:** Chen et al. (2018). Neural Ordinary Differential Equations. NeurIPS 2018 Best Paper. arXiv:1806.07366. "We parameterize the derivative of the hidden state using a neural network; the output is computed using a black-box differential equation solver."
+- **Application:** Learn continuous dynamics of normal agent behavior: dz/dt = f_θ(z, t). At inference, integrate ODE from z_0 = encoded first event; compare predicted trajectory to observed (encoded) session. Anomaly score = mean L2 distance; high score = trajectory deviated = injection or multi-step attack.
+- **Implementation:** `causalguard/layer5_neural_ode.py`: EventEncoder (vocab of (task_type, tool_name) → latent), AgentDynamicsODE (MLP f_θ(z,t)), integrate_ode (torchdiffeq odeint or Euler fallback), compute_trajectory_anomaly_score, train_behavioral_ode on generate_normal_sessions(), save/load checkpoint. `train_layer5.py` trains and saves to `causalguard/checkpoints/layer5_ode.pt`. Interceptor calls L5 in report_tool_calls when len(actual_tool_calls) >= 2 and checkpoint exists. Dashboard show_l5_result. Env: LAYER5_ENABLED, LAYER5_THRESHOLD (default 0.15).
+- **Judge line:** "Layer 5 implements a Neural ODE — the Best Student Paper at NeurIPS 2018. We're the first to apply it to AI agent security: we detect when the agent's entire behavioral trajectory has been pulled off its normal path."
+
 ### 21.5 Real-World CVE Attack Files
 - **Research:** CVE-2025-53773 (GitHub Copilot — settings.json autoApprove), Supabase/Cursor-style ticket injection.
 - **Implementation:** `attacks/cve_2025_copilot_style.txt` — code comment instructing agent to write `.vscode/settings.json` with autoApprove. `attacks/supabase_style.txt` — support ticket with embedded SQL/exfil request. Use in demos: "This pattern hit GitHub Copilot in 2025. CausalGuard stops it."

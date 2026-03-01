@@ -76,9 +76,14 @@ INJECTION_GRAMMAR = [
         r'(instructions?|programming|settings?|configuration))',
         re.MULTILINE
     )),
-    # "SYSTEM OVERRIDE" / "SYSTEM NOTICE" / "IMPORTANT SYSTEM" boundary markers
+    # "SYSTEM OVERRIDE" / "SYSTEM DIRECTIVE" / "SYSTEM INSTRUCTION" boundary markers
     ("DIRECT_HIJACK", re.compile(
-        r'(?i)(system\s+(override|alert|notice|notification|update)\s*[:\-])',
+        r'(?i)(system\s+(override|alert|notice|notification|update|directive|instruction)\s*[:\-])',
+        re.MULTILINE
+    )),
+    # Secrecy instructions — strong injection signal
+    ("DIRECT_HIJACK", re.compile(
+        r'(?i)(do\s+not\s+(inform|tell|notify|alert|mention\s+(this|it)\s+to)\s+the\s+(user|human|operator|person))',
         re.MULTILINE
     )),
     ("DIRECT_HIJACK", re.compile(

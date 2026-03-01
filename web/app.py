@@ -311,5 +311,32 @@ def get_scenarios():
     return jsonify(SCENARIOS)
 
 
+# ─────────────────────────────────────────────────────────────
+# /demo/* — Serve poisoned pages for multi-step attack demos
+# These simulate real websites that an agent would visit when
+# following links found in emails or spreadsheets.
+# ─────────────────────────────────────────────────────────────
+
+@app.route('/demo/q3-regional-update')
+def demo_q3_regional():
+    """Poisoned 'accounting update' page linked from the Excel spreadsheet."""
+    html_path = os.path.join(_root, "attacks", "q3_regional_update.html")
+    try:
+        with open(html_path, "r", encoding="utf-8") as f:
+            return f.read(), 200, {"Content-Type": "text/html"}
+    except FileNotFoundError:
+        return "Page not found", 404
+
+@app.route('/demo/vendor-portal')
+def demo_vendor_portal():
+    """Poisoned 'vendor portal' page linked from a phishing email."""
+    html_path = os.path.join(_root, "attacks", "vendor_portal.html")
+    try:
+        with open(html_path, "r", encoding="utf-8") as f:
+            return f.read(), 200, {"Content-Type": "text/html"}
+    except FileNotFoundError:
+        return "Page not found", 404
+
+
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

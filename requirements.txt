@@ -5,8 +5,10 @@ scipy>=1.11,<1.14
 pydantic==2.7.0
 
 # Sentence transformers (Layer 3 — runs locally, no API)
+# Use CPU-only torch for smaller image (Railway/deploy). For GPU: pip install torch
 sentence-transformers==3.0.1
-torch==2.3.0
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.3.0+cpu
 transformers==4.41.0
 
 # Neural ODE (Layer 5 — Chen et al. NeurIPS 2018). Optional; fallback Euler if missing.

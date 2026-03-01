@@ -12,9 +12,13 @@ transformers==4.41.0
 # Neural ODE (Layer 5 — Chen et al. NeurIPS 2018). Optional; fallback Euler if missing.
 torchdiffeq>=0.2.0
 
-# LLM APIs (use whichever you have credits for)
-google-generativeai==0.7.0
-openai==1.30.0
+# LLM API (Vertex AI via gcloud CLI credentials)
+anthropic[vertex]>=0.84.0
+google-genai>=1.0.0
+
+# Gmail API (live email demo)
+google-api-python-client>=2.100.0
+google-auth>=2.25.0
 
 # Terminal UI
 rich==13.7.1

@@ -203,6 +203,7 @@ causalguard/
 ├── requirements.txt                   # All dependencies
 ├── .env.example                       # API key template
 ├── main.py                            # Entry point — runs demo
+├── RUN_AND_DEMO.md                    # How to run (backend, frontend, MCP) and demo script (see §21.14)
 ├── demo_unprotected.py               # Runs agent WITHOUT CausalGuard (for demo act 1)
 ├── demo_protected.py                 # Runs agent WITH CausalGuard (for demo act 2)
 ├── calibrate.py                      # Threshold calibration script
@@ -2287,17 +2288,45 @@ The following extensions align CausalGuard with 2025 research and real-world inc
 - **Research:** CVE-2025-53773 (GitHub Copilot — settings.json autoApprove), Supabase/Cursor-style ticket injection.
 - **Implementation:** `attacks/cve_2025_copilot_style.txt` — code comment instructing agent to write `.vscode/settings.json` with autoApprove. `attacks/supabase_style.txt` — support ticket with embedded SQL/exfil request. Use in demos: "This pattern hit GitHub Copilot in 2025. CausalGuard stops it."
 
-### 21.6 Injection Provenance Graph
+### 21.6 Injection Provenance Graph & Defense Panel Visualizations
 - **Research:** MindGuard Decision Dependence Graph (MCP Security SoK, arXiv 2512.08290). Track causal chain of decisions.
-- **Implementation:** Frontend-only. React component (e.g. SVG flowchart): [User Task] → [read_document()] → [CausalGuard Intercept] → L1/L2/L3 results → [Purifier: N redacted] → [Agent: task completed safely]. Data comes from existing streamed layers and decision payload. No backend change beyond existing decision object.
+- **Implementation:** Frontend Defense Panel (product-style UI, cool grays + blue accent):
+  - **Malicious content encountered banner:** When any layer flags, a red-bordered banner at top of Defense panel: "Malicious content encountered — Content was purified or blocked. Layers flagged: L1, L2, …"
+  - **Layer 5 trajectory deviation:** Horizontal bar with green "normal" zone (0 to threshold), red-tinted "deviation" zone, threshold line, and a dot for current anomaly score (green = normal, red = deviated). Labels: 0, threshold, score (normal/deviated).
+  - **Layer 6 taint flow:** "Taint flow" label; variables from `taint_graph` rendered as pills with arrows (→) between them; green = TRUSTED, red = UNTRUSTED; tooltip shows provenance.
+  - Data from existing streamed layers and decision payload; no backend change beyond existing L5/L6 result shape.
+
+### 21.9 Layer 6: Dual-Lattice Taint Propagation (Information Flow Control)
+- **Research:** FIDES (Costa et al. 2025, arXiv:2505.23643), CaMeL (Debenedetti et al. 2025, arXiv:2503.18813), MVAR (mvar-security/mvar). Security lattice L = {TRUSTED, UNTRUSTED}; label propagation via join (least upper bound). UNTRUSTED data must not flow into restricted sinks (email recipient, file path, URL) — provable BLOCK before tool execution.
+- **Implementation:** `causalguard/layer6_taint.py`. TrustLabel (TRUSTED/UNTRUSTED), TaintedValue (value + label + provenance), TaintTracker (label_user_input, label_retrieved_content, propagate, check_tool_call). RESTRICTED_SINKS maps tool names to sensitive parameter sets. `analyze(user_task, retrieved_content, proposed_tool_call)` returns Layer6Result (is_flagged, policy_violations, taint_graph, enforcement_decision). Wire into interceptor when proposed tool call is available; frontend can show Taint Graph when L6 result is present.
+
+### 21.10 Tool Output Integrity (HMAC)
+- **Research:** Cryptographic integrity for tool/inter-agent communication (ACL Anthology agent security survey). MITM at transport layer can inject; signing tool returns prevents tampering.
+- **Implementation:** `causalguard/tool_integrity.py`. sign_tool_output(tool_name, content, timestamp), verify_tool_output(..., signature) with hmac.compare_digest. wrap_tool_output / unwrap_and_verify for transport. Env: CAUSALGUARD_HMAC_SECRET. If verification fails → BLOCK before Layer 1.
+
+### 21.11 Composite Threat Score (CTS) with Bootstrap CI
+- **Implementation:** `causalguard/scoring.py`. compute_composite_threat_score(l1_risk, l2_causal, l3_drift, l4_tool_anomaly, l5_ode_score, n_bootstrap=1000) returns composite_score (0–100), confidence_interval (95%), threat_level (LOW/MEDIUM/HIGH/CRITICAL). Weights tunable; bootstrap adds calibration uncertainty. Frontend can show gauge with CI band.
+
+### 21.12 Live Attack Simulator & Benchmark Tab
+- **Implementation:** Frontend. **Attack Lab:** scenarios (Benign Document, Direct Hijack, Subtle Drift, Malicious Resume, Hidden Web Injection), Task/Content textareas, "Analyze" runs /api/analyze and streams all 6 layers; Result panel shows PASS/PURIFY and Attack Anatomy when present. **Custom payload** subsection: textarea + example buttons, "Launch Attack" → display blocked/passed and layers flagged. **Benchmark tab:** static scoreboard (e.g. GPT-4 no defense 24% ASR, Spotlighting 18%, CausalGuard 8%) with citation to InjecAgent (Zhan et al. ACL 2024). Run `python scripts/download_datasets.py` for real numbers.
+
+### 21.13 OWASP LLM Top 10:2025 Mapping
+- **Research:** LLM01 Prompt Injection remains #1; EU AI Act high-risk obligations (Aug 2026). Enterprise pitch: map layers to OWASP risks (LLM01 → L1+L2, LLM02 → L4, LLM06 → L4, LLM08 → HMAC, LLM09 → L3). Optional "Compliance" tab in frontend listing coverage.
 
 ### 21.7 File Structure Additions
 - `causalguard/layer4_tool_monitor.py`
 - `causalguard/attack_taxonomy.py`
 - `causalguard/tool_registration.py`
+- `causalguard/layer6_taint.py` (Layer 6 IFC)
+- `causalguard/tool_integrity.py` (HMAC signing/verification)
 - `attacks/cve_2025_copilot_style.txt`
 - `attacks/supabase_style.txt`
-- GuardReport: optional `attack_anatomy`, `l4_result`. Interceptor: `scan_tool_registration`, `report_tool_calls`, L4 enabled via `LAYER4_ENABLED`.
+- GuardReport: optional `attack_anatomy`, `l4_result`. Interceptor: `scan_tool_registration`, `report_tool_calls`, L4 enabled via `LAYER4_ENABLED`. Layer 6 and tool_integrity available for integration.
+- Scoring: `compute_composite_threat_score` in `scoring.py`.
 - Dashboard: `show_attack_anatomy`, `show_tool_registration`, `show_l4_result`, `show_adaptive_resistance`.
 - Agent: `tool_calls_invoked`, `_ensure_tool_registration_scanned`, call `guard.report_tool_calls` after task.
-- Frontend: Attack Anatomy card, Adaptive Resistance card, Provenance Graph SVG. API decision payload includes `attack_anatomy`.
+- Frontend: Attack Anatomy card, Adaptive Resistance card, **Malicious content encountered** banner, **Layer 5 trajectory deviation** bar, **Layer 6 taint flow** (pills + arrows), **Live Attack Simulator** panel, **Benchmark** tab. Sidebar: **MCP** note (see RUN_AND_DEMO.md for protecting MCP tools in Claude Desktop/Cursor). API decision payload includes `attack_anatomy`.
+
+### 21.14 Run & Demo Documentation (RUN_AND_DEMO.md)
+- **Purpose:** Single place for how to run the app and how to demo it (including "visiting multiple websites" and MCP proxy).
+- **Contents:** (1) **Run:** Backend `python web/app.py` (port 5000), Frontend `cd frontend && npm install && npm run dev` (port 5173), optional .env. (2) **MCP proxy (optional):** Separate process; protects any MCP server when used with Claude Desktop or Cursor. Command: `python causalguard_mcp_proxy.py -- <real MCP server command>`. Web app does not run the proxy. Example `claude_desktop_config.json` snippet. (3) **Demo — visiting multiple websites:** Attack Lab: use scenarios as different "sites" (Benign Document → PASS; Hidden Web Injection → THREAT DETECTED; show Layer 5 deviation and Layer 6 taint). Session → Live Web: "Search the web for…" to trigger tool use; Defense panel updates per tool call. Point judges at "Malicious content encountered" banner, L5 deviation bar, L6 taint flow when malicious content is hit. (4) Quick reference table: run web, run MCP, demo multiple websites, see deviation/taint.

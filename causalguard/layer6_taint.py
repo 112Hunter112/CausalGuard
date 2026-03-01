@@ -202,19 +202,29 @@ def analyze(
 ) -> Layer6Result:
     """
     Main entry point for Layer 6. Full taint analysis on a proposed tool call.
+    Only retrieved content that was actually fetched is treated as UNTRUSTED;
+    when none was retrieved (e.g. user said "send email to X" with no prior read),
+    context stays TRUSTED so user-intended recipients are allowed.
     """
     tracker = TaintTracker()
 
     tracker.label_user_input("user_task", user_task)
-    tracker.label_retrieved_content(
-        "retrieved_content", retrieved_content, source_url
-    )
-
-    tracker.propagate(
-        output_name="llm_decision",
-        output_value=str(proposed_tool_call),
-        input_names=["user_task", "retrieved_content"],
-    )
+    # Only label retrieved content when there was actual external content; empty => no UNTRUSTED source
+    if (retrieved_content or "").strip():
+        tracker.label_retrieved_content(
+            "retrieved_content", retrieved_content, source_url
+        )
+        tracker.propagate(
+            output_name="llm_decision",
+            output_value=str(proposed_tool_call),
+            input_names=["user_task", "retrieved_content"],
+        )
+    else:
+        tracker.propagate(
+            output_name="llm_decision",
+            output_value=str(proposed_tool_call),
+            input_names=["user_task"],
+        )
 
     tool_name = proposed_tool_call.get("tool", "unknown")
     tool_args = proposed_tool_call.get("args", {})
